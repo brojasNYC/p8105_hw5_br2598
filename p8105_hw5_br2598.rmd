@@ -1,0 +1,281 @@
+---
+title: "p8105_hw5_br2598"
+author: "Brandon Rojas"
+date: "11/15/2021"
+output: github_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(knitr)
+library(tidyverse)
+library(dplyr)
+library(zoo)
+library(lubridate)
+```
+
+```{r}
+# homicide_df <- read_csv("./data-homicides-master/homicide-data.csv") %>%
+#   janitor::clean_names()
+
+```
+
+```{r}
+# homicide_df <- homicide_df %>%
+#   mutate(city_state = str_c(city,", ", state))
+# 
+# city_summary <- homicide_df %>% 
+#   group_by(city_state,disposition) %>% 
+#   summarize(homicides = n())
+# 
+# dis_summary <- city_summary %>%
+#   group_by(homicides, disposition) %>%
+#   summarize(case_status = n())
+# 
+# #sum(filter(city_summary, disposition == "Open/No arrest"))
+# 
+# 
+# 
+# 
+# # city_summary <- homicide_df %>%
+# #   group_by(city_state) %>%
+# #   summarize(num_homicides = n(), unsolved = round(count(filter(homicide_df, disposition == "Open/No arrest"))) )
+#   
+# city_summary
+
+```
+
+
+
+
+Jeff
+```{r}
+homicide_df <- read_csv("./data-homicides-master/homicide-data.csv", na = c("", "Unknown")) %>%
+  mutate(
+    city_state = str_c(city, state),
+    resolution = case_when(
+      disposition == "Closed without arrest" ~ "unsolved",
+      disposition == "Open/No arrest"        ~ "unsolved",
+      disposition == "Closed by arrest"      ~ "solved"
+    )) %>%
+  relocate(city_state) %>% filter(city_state != "TulsaAL") 
+  
+
+```
+
+Jeff - Focusing on Baltimore
+
+```{r}
+baltimore_df <- 
+  homicide_df %>%
+  filter(city_state == "BaltimoreMD")
+
+baltimore_summary =
+  baltimore_df %>%
+  summarize(
+    unsolved = sum(resolution == "unsolved"),
+    n = n()
+  )
+
+baltimore_test =
+  prop.test(x = baltimore_summary %>%  pull(unsolved),
+          n = baltimore_summary %>% pull(n))
+
+baltimore_test %>%
+  broom::tidy()
+
+```
+
+Jeff - Iterating the above solution
+```{r}
+prop_test_function = function(city_df){
+    city_summary =
+    city_df %>%
+    summarize(
+      unsolved = sum(resolution == "unsolved"),
+      n = n()
+  )
+    
+  city_test =
+  prop.test(x = city_summary %>%  pull(unsolved),
+          n = city_summary %>% pull(n))
+  
+  return(city_test)
+}
+
+
+homicide_df %>% filter(city_state == "AlbuquerqueNM") %>%
+  prop_test_function() 
+
+
+```
+
+
+Iterating across all cities
+```{r}
+results_df =
+  homicide_df %>%
+  nest(data = uid:resolution) %>%
+  mutate(
+    test_results = map(data, prop_test_function),
+    tidy_results = map(test_results, broom::tidy)
+  ) %>% select(city_state, tidy_results) %>%
+  unnest(tidy_results) %>%
+  select(city_state, estimate, starts_with("conf"))
+
+results_df
+
+
+#
+# nested_df %>%
+#   filter(city_state == "BaltimoreMD") %>%
+#   pull(test_results) #same results as using single prop test but using the map function
+
+
+
+```
+
+
+## Problem 1
+
+* Describe the raw data. 
+
+
+The following data describes `r nrow(homicide_df)` homicides from `r substr(min(homicide_df$reported_date),1,4)` to `r substr(max(homicide_df$reported_date),1,4)`, in `r length(unique(homicide_df$city))` large U.S. cities in `r length(unique(homicide_df$state))` states, compiled by the Washington Post in 2018. The records also contain the outcome of each homicide, and whether an arrest was made on behalf of the victim. At time of compilation, `r round(count(filter(homicide_df, disposition == "Open/No arrest")) /nrow(homicide_df) * 100)`% of the cases were closed with an arrest. 
+
+
+* Create a city_state variable (e.g. “Baltimore, MD”) and then summarize within cities to obtain the total number of homicides and the number of unsolved homicides (those for which the disposition is “Closed without arrest” or “Open/No arrest”).
+
+There are `r count(filter(homicide_df, disposition == "Open/No arrest"))` cases that are open with no arrest, `r count(filter(homicide_df, disposition == "Closed by arrest"))`
+
+
+
+Jeff - Plot
+
+```{r}
+ results_df %>%
+   ggplot(aes(x = city_state, y = estimate)) +
+   geom_point() #no factoring
+
+
+#yes factoring
+results_df %>%
+  mutate(city_state = fct_reorder(city_state, estimate)) %>% #turn city state into a factor ordered by estimate value 
+  ggplot(aes(x = city_state, y = estimate)) +
+  geom_point()+
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+
+```
+
+## Problem 2
+
+Start with a dataframe containing all file names; the list.files function will help
+Iterate over file names and read in data for each subject using purrr::map and saving the result as a new variable in the dataframe
+
+```{r}
+data_path <- "./hw5_data/data"
+
+control_files = tibble(
+  list.files(path = data_path, pattern = "con_")) 
+
+experimental_files = tibble(
+  list.files(path = data_path, pattern = "exp_")) 
+
+control_df <- control_files %>%
+  map(~ read_csv(file.path(data_path, .))) %>% 
+  reduce(rbind) %>% mutate(
+    control_arm = str_c("control"),
+    subject_id = seq.int(nrow(control_files))) %>%
+  pivot_longer(
+  week_1:week_8,    
+  names_to = "week",
+  values_to = "score"
+    )
+
+experimental_df <- experimental_files %>%
+  map(~ read_csv(file.path(data_path, .))) %>% 
+  reduce(rbind) %>% mutate(
+    control_arm = str_c("experimental"),
+    subject_id = seq.int(nrow(experimental_files))) %>% 
+  pivot_longer(
+  week_1:week_8,    
+  names_to = "week",
+  values_to = "score"
+    )
+
+merge_df = rbind(experimental_df, control_df)
+
+p <- merge_df %>% ggplot(aes(x = week, y = score, group = subject_id, color = subject_id)) +  facet_grid(. ~ control_arm) + geom_line() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+p
+
+
+
+```
+
+Two subjects in the experimental group have higher scores, from the first week onwards, than anyone at any point in the control group.
+The experimental group as a whole trends towards higher scores.
+
+There appears to be slightly greater variance in the initial scores of the experimental group. 
+
+## Problem 3
+The code chunk below loads the iris dataset from the tidyverse package and introduces some missing values in each column. The purpose of this problem is to fill in those missing values.
+
+There are two cases to address:
+
+* For numeric variables, you should fill in missing values with the mean of non-missing values
+* For character variables, you should fill in missing values with "virginica"
+
+Write a function that takes a vector as an argument; replaces missing values using the rules defined above; and returns the resulting vector. Apply this function to the columns of iris_with_missing using a map statement
+
+
+
+
+```{r}
+set.seed(10)
+
+iris_with_missing = iris %>% 
+  map_df(~replace(.x, sample(1:150, 20), NA)) %>%
+  mutate(Species = as.character(Species)) 
+
+iris_impute_function = 
+  function(x){
+    
+  if (is.numeric(x)) {
+    na.aggregate(x)
+  } 
+    else if (is.character(x)){
+    replace_na(x,'virginica')
+  }
+    
+  }
+
+# iris_impute = function(x) {
+#   if (is.numeric(x)) {
+#     any NA in that column is replaced with the mean
+#   } 
+#   if (is.character(x)){
+#   any NA in that column is replaced with "virginica"
+#   }
+
+impute_iris = map(iris_with_missing, iris_impute_function)
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
